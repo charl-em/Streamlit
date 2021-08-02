@@ -1,9 +1,4 @@
 # Core Pkgs
-pip install streamlit
-pip install numpy as np
-pip install pandas as pd
-pip install os, glob
-pip install sklearn
 
 import streamlit as st
 import numpy as np
