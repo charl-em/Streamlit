@@ -1,8 +1,9 @@
 # Core Pkgs
-import streamlit as st
-import numpy as np
-import pandas as pd
-import os, glob
+py -m pip install streamlit as st
+py -m pip install numpy as np
+py -m pip install pandas as pd
+py -m pip install os, glob
+py -m pip install sklearn
 # Separation du jeu de donnée
 from sklearn.model_selection import train_test_split
 # Metrique
