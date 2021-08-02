@@ -1,0 +1,14 @@
+# Core Pkgs
+import streamlit as st
+import numpy as np
+import pandas as pd
+import os, glob
+# Separation du jeu de donnée
+from sklearn.model_selection import train_test_split
+# Metrique
+from sklearn.metrics import precision_recall_fscore_support
+from sklearn.metrics import accuracy_score, recall_score, precision_score
+from sklearn.ensemble import RandomForestClassifier
+# Erreur
+import warnings
+warnings.filterwarnings("ignore")
