@@ -1,19 +1,4 @@
-# Core Pkgs
-
-import streamlit as st
-import numpy as np
-import pandas as pd
-import install os, glob
-import sklearn
-
-# Separation du jeu de donnée
-from sklearn.model_selection import train_test_split
-
-# Metrique
-from sklearn.metrics import precision_recall_fscore_support
-from sklearn.metrics import accuracy_score, recall_score, precision_score
-from sklearn.ensemble import RandomForestClassifier
-
-# Erreur
-import warnings
-warnings.filterwarnings("ignore")
+streamlit==0.85.1
+numpy==1.20.3
+pandas==1.2.4
+scikit_learn==0.24.2
