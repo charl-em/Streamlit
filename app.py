@@ -2,7 +2,12 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
+from pandas import DataFrame
 import os, glob
+# Connexion à la base de données
+import mysql.connector
+# Normalisation
+from sklearn.preprocessing import RobustScaler
 # Separation du jeu de donnée
 from sklearn.model_selection import train_test_split
 # Metrique
@@ -13,21 +18,39 @@ from sklearn.ensemble import RandomForestClassifier
 import warnings
 warnings.filterwarnings("ignore")
 
-st.title("Prédiction sur le statut du client de la banque")
+
+st.subheader("Select Banque.csv")
+# Initialize connection.
+# Uses st.cache to only run once.
+@st.cache(allow_output_mutation=True, hash_funcs={"_thread.RLock": lambda _: None})
+def init_connection():
+    return mysql.connector.connect(**st.secrets["mysql"])
+
+conn = init_connection()
+
+# Perform query.
+# Uses st.cache to only rerun when the query changes or after 10 min.
+@st.cache(ttl=600)
+def run_query(query):
+    with conn.cursor() as cur:
+        cur.execute(query)
+        return cur.fetchall()
+
+menu = ["Prédiction unique","Prédiction multiple depuis la base de données","A propos"]
+choice = st.sidebar.selectbox("Options de prédictions",menu)
 
 def file_selector(folder_path='./'):
-	    filenames = os.listdir(folder_path)
-	    selected_filename = st.selectbox('Select a file', filenames)
-	    return os.path.join(folder_path, selected_filename)
+        filenames = os.listdir(folder_path)
+        selected_filename = st.selectbox('Select a file', filenames)
+        return os.path.join(folder_path, selected_filename)
 
 filename = file_selector()
 st.write('You selected `%s`' % filename)
 df = pd.read_csv(filename, sep=';')
-st.write(df.head())
 
 # required features for predicting churning customers
 required_fields = ["Attrition_Flag", "Contacts_Count_12_mon", "Total_Trans_Ct", "Total_Trans_Amt",
-                   "Total_Revolving_Bal", "Avg_Utilization_Ratio"]
+                "Total_Revolving_Bal", "Avg_Utilization_Ratio"]
 df = df.loc[:, required_fields]
 
 def get_dataset(df):
@@ -38,19 +61,7 @@ X, y = get_dataset(df)
 
 # required features for user input
 required_fields = ["Contacts_Count_12_mon", "Total_Trans_Ct", "Total_Trans_Amt",
-                   "Total_Revolving_Bal", "Avg_Utilization_Ratio"]
-st.write('Caractéristiques requises (abrégé et dans l\'ordre):', required_fields)
-
-st.subheader("Veuillez renseignez les valeurs ci-dessous en chiffres")
-
-with st.form(key='form1'):
-    f1 = st.number_input("Nombre de contacts au cours des 12 derniers mois",1,100)
-    f2 = st.number_input("total de transactions (12 derniers mois)",1,100)
-    f3 = st.number_input("Montant total de la transaction (12 derniers mois)",1,100000)
-    f4 = st.number_input("Solde renouvelable total sur la carte de crédit",1,3000)
-    f5 = st.number_input("Taux d'utilisation moyen de la carte",0,1)
-    user_input = np.array([f1,f2,f3,f4,f5]).reshape(1, -1)
-    submit_button = st.form_submit_button(label='Evaluer')
+                "Total_Revolving_Bal", "Avg_Utilization_Ratio"]
 
 customers_type = df.groupby("Attrition_Flag")
 # 1. Clearly distinguish between chunked and un-chunked customers (grouping).
@@ -77,16 +88,9 @@ non_dist_churned_customers = unchurned_customers.reindex(index=non_dist_indexes)
 cat_types = ['bool','object','category']
 data_clean = df.copy()
 data_clean[data_clean.select_dtypes(cat_types).columns] = data_clean.select_dtypes(cat_types).apply(lambda x: x.astype('category'))
-st.text("Dataset utilsé pour la prédiction : ")
-st.write(data_clean.head()) 
-    # Label and One Hot Encoding on catagorical independent variables
-    # Label Encoding for ordinal variables (ex: rankings, scales, etc)
-    # One Hot Encoding for nominal variables (ex: color, gender, etc.)
 
-    # Use One Hot Eoncoding on each catagorical independent variables 
-    # Because Income_Category has an "Unknown" value, unable to convert to an ordinal variable to use Label Encoding 
-
-    # https://stackoverflow.com/questions/37292872/how-can-i-one-hot-encode-in-python
+# Label and One Hot Encoding on catagorical independent variables
+# https://stackoverflow.com/questions/37292872/how-can-i-one-hot-encode-in-python
 
 # Split data_clean into two datasets y - depedent variable, x - independent variables 
 # Map Attrited Customer = 1 and Existing Customer = 0
@@ -105,36 +109,80 @@ def encode_and_bind(original_dataframe, feature_to_encode):
     features_to_encode = X.select_dtypes('category').columns.to_list()
     for feature in features_to_encode:
         X = encode_and_bind(X, feature)
+
+scaler = RobustScaler()
+
 #  train-test stratified split using 80-20 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state = 0, shuffle= True,stratify = y)
 # Initial fit using RandomForestClassifier
 RFC = RandomForestClassifier(random_state = 0)
 RFC.fit(X_train,y_train)
 
-
-
 # Calculate Precision, Recall, F1-Score, and Accurarcy 
 # https://towardsdatascience.com/accuracy-precision-recall-or-f1-331fb37c5cb9 
 # predictions using RFC model given X_test data
 y_pred = RFC.predict(X_test)
 
-user_input_pred = RFC.predict(user_input)
-statut_client = ""
-if user_input_pred == 0:
-    statut_client = "Existing"
+if choice == "Prédiction unique":
+    st.title('Prédiction unique du statut du client de la banque')
+    st.subheader("Veuillez renseignez les valeurs ci-dessous en chiffres")
+
+    with st.form(key='form1'):
+        f1 = st.number_input("Nombre de contacts au cours des 12 derniers mois",1,100)
+        f2 = st.number_input("total de transactions (12 derniers mois)",1,100)
+        f3 = st.number_input("Montant total de la transaction (12 derniers mois)",1,100000)
+        f4 = st.number_input("Solde renouvelable total sur la carte de crédit",1,100000)
+        f5 = st.number_input("Taux d'utilisation moyen de la carte",0,1)
+        user_input = np.array([f1,f2,f3,f4,f5]).reshape(1, -1)
+        submit_button = st.form_submit_button(label='Evaluer')
+
+    user_input_pred = RFC.predict(user_input)
+    statut_client = ""
+    if user_input_pred == 0:
+        statut_client = "Existing"
+    else:
+        statut_client = "Attrited"
+    if submit_button:
+        st.success("Le statut du client est {} ".format(statut_client))
+
+elif choice == "Prédiction multiple depuis la base de données":
+    number = st.number_input('Entrez un nombre positif entre 10127', min_value=0, max_value=10127, step=1)
+    rows = run_query(f"SELECT Contacts_Count_12_mon, Total_Trans_Ct, Total_Trans_Amt, Total_Revolving_Bal, Avg_Utilization_Ratio FROM `banque` ORDER BY RAND() LIMIT {number};")
+    st.title("Prédiction multiple depuis la base de données")
+    mult_stat_client = []
+    for row in rows:
+        db_input = np.array(row).reshape(1, -1)
+        st.write(db_input)
+        mult_rand_db_input_pred = RFC.predict(db_input)
+        # st.write(mult_rand_db_input_pred)
+        if  mult_rand_db_input_pred == 0:
+            mult_stat_client.append('Existing')
+        else:
+            mult_stat_client.append('Attrited')
+        # st.write(mult_stat_client)
+    pred_db_input = DataFrame(mult_stat_client,columns= ['Prediction'])
+    st.write(pred_db_input)
 else:
-    statut_client = "Attrited"
+    st.title("A propos")
+    st.text('App de prédiction du statut du client entrainé à partir du dataset Banque.csv')
+    st.text('Prédiction unique : donne le statut d\'un client de la banque selon les valeurs enregistrées dans le formulaire')
+    st.text('Prédiction multiple depuis la base de données: donne le statut de 10 clients de la banque selon les valeurs enregistrés en base de données')
+    st.write(df.head())
+    st.write('Caractéristiques requises (abrégé et dans l\'ordre):', required_fields)
+    st.text("Dataset utilsé pour la prédiction : ")
+    st.write(data_clean.head()) 
+    st.success("Built with Streamlit")
+    st.info("LinkedIn : Charles Emmanuel Kouadio")
 
-if submit_button:
-    st.success("Le statut du client est {} ".format(statut_client))
+    
+        
+# # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.precision_recall_fscore_support.html
+# # precision, recall, f1-score
+# precision_recall_fscore_support(y_test, y_pred, average='binary',pos_label=1,beta = 1)
 
-# https://scikit-learn.org/stable/modules/generated/sklearn.metrics.precision_recall_fscore_support.html
-# precision, recall, f1-score
-precision_recall_fscore_support(y_test, y_pred, average='binary',pos_label=1,beta = 1)
-
-# classification_report for Attrited Customer  
-st.write("Accuracy: %.2f%%" % (accuracy_score(y_test, y_pred)*100.0))
-st.write("Recall: %.2f%%" % ((recall_score(y_test,y_pred))*100.0))
+# # classification_report for Attrited Customer  
+# st.write("Accuracy: %.2f%%" % (accuracy_score(y_test, y_pred)*100.0))
+# st.write("Recall: %.2f%%" % ((recall_score(y_test,y_pred))*100.0))
 
 
 
