@@ -6,7 +6,6 @@ from pandas import DataFrame
 import os, glob
 # Connexion à la base de données
 import sqlite3
-import mysql.connector
 # Normalisation
 from sklearn.preprocessing import RobustScaler
 # Separation du jeu de donnée
