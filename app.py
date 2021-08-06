@@ -72,7 +72,7 @@ data_clean[data_clean.select_dtypes(cat_types).columns] = data_clean.select_dtyp
 
 # Split data_clean into two datasets y - depedent variable, x - independent variables 
 # Map Attrited Customer = 1 and Existing Customer = 0
-codes = {'Existing Customer':1, 'Attrited Customer':0}
+codes = {'Existing Customer':0, 'Attrited Customer':1}
 data_clean['Attrition_Flag'] = data_clean['Attrition_Flag'].map(codes)
 
 y = data_clean['Attrition_Flag']
