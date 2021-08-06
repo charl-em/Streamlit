@@ -5,6 +5,7 @@ import pandas as pd
 from pandas import DataFrame
 import os, glob
 # Connexion à la base de données
+import sqlite3
 import mysql.connector
 # Normalisation
 from sklearn.preprocessing import RobustScaler
@@ -19,27 +20,35 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-st.subheader("Select Banque.csv")
+
 # Initialize connection.
 # Uses st.cache to only run once.
-@st.cache(allow_output_mutation=True, hash_funcs={"_thread.RLock": lambda _: None})
-def init_connection():
-    return mysql.connector.connect(**st.secrets["mysql"])
+# @st.cache(allow_output_mutation=True, hash_funcs={"_thread.RLock": lambda _: None})
+# def init_connection():
+#     return mysql.connector.connect(**st.secrets["mysql"])
 
-conn = init_connection()
+# conn = init_connection()
 
 # Perform query.
 # Uses st.cache to only rerun when the query changes or after 10 min.
-@st.cache(ttl=600)
-def run_query(query):
-    with conn.cursor() as cur:
-        cur.execute(query)
-        return cur.fetchall()
+# @st.cache(ttl=600)
+# def run_query(query):
+#     with conn.cursor() as cur:
+#         cur.execute(query)
+#         return cur.fetchall()
 
-menu = ["Prédiction unique","Prédiction multiple depuis la base de données","A propos"]
-choice = st.sidebar.selectbox("Options de prédictions",menu)
+conn = sqlite3.connect('db.sqlite3')
+c = conn.cursor()
 
-def file_selector(folder_path='./'):
+def select_aleatoire(nbre):
+    c.execute('SELECT Contacts_Count_12_mon, Total_Trans_Ct, Total_Trans_Amt, Total_Revolving_Bal, Avg_Utilization_Ratio , Attrition_Flag FROM data_credit_card ORDER BY RANDOM() LIMIT "{}"'.format(nbre))
+    data = c.fetchall()
+    return data
+
+menu = ["Unique prediction","Multiple prediction from the database","About"]
+choice = st.sidebar.selectbox("Préedictions options",menu)
+
+def file_selector(folder_path='./database/'):
         filenames = os.listdir(folder_path)
         selected_filename = st.selectbox('Select a file', filenames)
         return os.path.join(folder_path, selected_filename)
@@ -51,42 +60,12 @@ df = pd.read_csv(filename, sep=';')
 # required features for predicting churning customers
 required_fields = ["Attrition_Flag", "Contacts_Count_12_mon", "Total_Trans_Ct", "Total_Trans_Amt",
                 "Total_Revolving_Bal", "Avg_Utilization_Ratio"]
-df = df.loc[:, required_fields]
-
-def get_dataset(df):
-    y = df['Attrition_Flag']
-    X = df.drop('Attrition_Flag',errors='ignore',axis=1)
-    return X, y
-X, y = get_dataset(df)
-
-# required features for user input
-required_fields = ["Contacts_Count_12_mon", "Total_Trans_Ct", "Total_Trans_Amt",
-                "Total_Revolving_Bal", "Avg_Utilization_Ratio"]
-
-customers_type = df.groupby("Attrition_Flag")
-# 1. Clearly distinguish between chunked and un-chunked customers (grouping).
-
-churned_customers = customers_type.get_group("Attrited Customer")
-unchurned_customers = customers_type.get_group("Existing Customer")
-
-# 2. Use factors from our data exploration that have clearly seperated 
-# chunked from un-chunked customers to select distinctive un-chunked customers.
-
-dist_churned_customers = unchurned_customers.where(
-    (df.Total_Trans_Ct > 85) &
-    (df.Total_Trans_Amt > 5000) &
-    ((df.Total_Revolving_Bal > 500) & (df.Total_Revolving_Bal < 2500)) &
-    (df.Avg_Utilization_Ratio > 0.1)
-).dropna()
-
-non_dist_indexes = [i for i in list(df.index) if i not in list(dist_churned_customers.index)]
-non_dist_churned_customers = unchurned_customers.reindex(index=non_dist_indexes).dropna()
+df_model = df.loc[:, required_fields]
 
 #Clean dataset, and convert appropriate columns to appropriate dtypes()  
-
 # convert bool and object to category 
 cat_types = ['bool','object','category']
-data_clean = df.copy()
+data_clean = df_model.copy()
 data_clean[data_clean.select_dtypes(cat_types).columns] = data_clean.select_dtypes(cat_types).apply(lambda x: x.astype('category'))
 
 # Label and One Hot Encoding on catagorical independent variables
@@ -117,24 +96,23 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 # Initial fit using RandomForestClassifier
 RFC = RandomForestClassifier(random_state = 0)
 RFC.fit(X_train,y_train)
-
-# Calculate Precision, Recall, F1-Score, and Accurarcy 
-# https://towardsdatascience.com/accuracy-precision-recall-or-f1-331fb37c5cb9 
+ 
 # predictions using RFC model given X_test data
 y_pred = RFC.predict(X_test)
 
-if choice == "Prédiction unique":
-    st.title('Prédiction unique du statut du client de la banque')
-    st.subheader("Veuillez renseignez les valeurs ci-dessous en chiffres")
+if choice == "Unique prediction":
+    st.subheader("Select Banque.csv")
+    st.title('Unique prediction of the bank customer\'s status')
+    st.subheader("Please fill in the values ​​below in numbers")
 
     with st.form(key='form1'):
-        f1 = st.number_input("Nombre de contacts au cours des 12 derniers mois",1,100)
-        f2 = st.number_input("total de transactions (12 derniers mois)",1,100)
-        f3 = st.number_input("Montant total de la transaction (12 derniers mois)",1,100000)
-        f4 = st.number_input("Solde renouvelable total sur la carte de crédit",1,100000)
-        f5 = st.number_input("Taux d'utilisation moyen de la carte",0,1)
+        f1 = st.number_input("Number of contacts in the last 12 months",1,100)
+        f2 = st.number_input("total transactions (last 12 months)",1,100)
+        f3 = st.number_input("Total amount of the transaction (last 12 months)",1,100000)
+        f4 = st.number_input("Total revolving balance on the credit card",1,100000)
+        f5 = st.number_input("Average card usage rate",0,1)
         user_input = np.array([f1,f2,f3,f4,f5]).reshape(1, -1)
-        submit_button = st.form_submit_button(label='Evaluer')
+        submit_button = st.form_submit_button(label='Assess')
 
     user_input_pred = RFC.predict(user_input)
     statut_client = ""
@@ -143,56 +121,82 @@ if choice == "Prédiction unique":
     else:
         statut_client = "Attrited"
     if submit_button:
-        st.success("Le statut du client est {} ".format(statut_client))
+        st.success("The customer's status is {} ".format(statut_client))
 
-elif choice == "Prédiction multiple depuis la base de données":
-    number = st.number_input('Entrez un nombre positif entre 10127', min_value=0, max_value=10127, step=1)
-    rows = run_query(f"SELECT Contacts_Count_12_mon, Total_Trans_Ct, Total_Trans_Amt, Total_Revolving_Bal, Avg_Utilization_Ratio FROM `banque` ORDER BY RAND() LIMIT {number};")
-    st.title("Prédiction multiple depuis la base de données")
-    mult_stat_client = []
-    for row in rows:
-        db_input = np.array(row).reshape(1, -1)
-        st.write(db_input)
-        mult_rand_db_input_pred = RFC.predict(db_input)
-        # st.write(mult_rand_db_input_pred)
-        if  mult_rand_db_input_pred == 0:
-            mult_stat_client.append('Existing')
-        else:
-            mult_stat_client.append('Attrited')
-        # st.write(mult_stat_client)
-    pred_db_input = DataFrame(mult_stat_client,columns= ['Prediction'])
-    st.write(pred_db_input)
+elif choice == "Multiple prediction from the database":
+    number = st.number_input('Enter a positive number between 10127', min_value=0, max_value=10127, step=1)
+    # rows = run_query(f"SELECT Contacts_Count_12_mon, Total_Trans_Ct, Total_Trans_Amt, Total_Revolving_Bal, Avg_Utilization_Ratio FROM `banque` ORDER BY RAND() LIMIT {number};")
+    # st.title("Prédiction multiple depuis la base de données")
+    # mult_stat_client = []
+    # for row in rows:
+    #     db_input = np.array(row).reshape(1, -1)
+    #     st.write(db_input)
+    #     mult_rand_db_input_pred = RFC.predict(db_input)
+    #     # st.write(mult_rand_db_input_pred)
+    #     if  mult_rand_db_input_pred == 0:
+    #         mult_stat_client.append('Existing')
+    #     else:
+    #         mult_stat_client.append('Attrited')
+    #     # st.write(mult_stat_client)
+    # pred_db_input = DataFrame(mult_stat_client,columns= ['Prediction'])
+    # st.write(pred_db_input)
+
+    rechercher = st.button('Load')
+    if rechercher:
+        resul_rech_al = select_aleatoire(number)
+        result_al_df = pd.DataFrame(resul_rech_al,columns=["Contacts_Count_12_mon", "Total_Trans_Ct", "Total_Trans_Amt",
+                "Total_Revolving_Bal", "Avg_Utilization_Ratio","Attrition_Flag"] )
+        # st.dataframe(result_al_df)
+
+        liste_pred = []
+        for i in range(result_al_df.shape[0]):
+            X = result_al_df.iloc[i,:-1]
+        #    for j in range(X.shape[0]):
+        #     #    st.write(X[j])
+            X=np.array(X).reshape(1,-1)
+            #st.write(X)
+
+            ypred = RFC.predict(X)
+            # st.write(ypred)
+
+            if ypred==0:
+                msg="Existing client"
+            elif ypred==1:
+                msg="Attrited client"
+
+            liste_pred.append(msg)
+        # st.dataframe(pd.DataFrame(liste_pred, columns=["Predictions"]))
+
+        de=pd.concat([result_al_df, pd.DataFrame(liste_pred, columns=["Predictions"])], axis=1)
+        st.dataframe(de)
 else:
-    st.title("A propos")
-    st.text('App de prédiction du statut du client entrainé à partir du dataset Banque.csv')
-    st.text('Prédiction unique : donne le statut d\'un client de la banque selon les valeurs enregistrées dans le formulaire')
-    st.text('Prédiction multiple depuis la base de données: donne le statut de 10 clients de la banque selon les valeurs enregistrés en base de données')
+    st.title("About")
+    st.subheader("CONTEXT")
+    st.text("A bank official wants to reduce the number of customers who leave their credit card services. He would like to be able to anticipate the departure of customers in order to provide them with better services and thus retain them.")
+    st.subheader("GOALS")
+    st.text("Set up a Machine Learning model capable of predicting customer departures trained from the Banque.csv dataset.")
+    st.text('Prédiction multiple depuis la base de données: donne le statut d\'un nombre sélectionnés de clients de la banque selon les valeurs enregistrés en base de données')
+    st.text('Dataset original :')
     st.write(df.head())
-    st.write('Caractéristiques requises (abrégé et dans l\'ordre):', required_fields)
-    st.text("Dataset utilsé pour la prédiction : ")
+    st.write('Required features (abrégé et dans l\'ordre):', required_fields)
+    st.subheader("Dataset description :")
+    st.write("Initial dimension of the dataset : ", df.shape)
+    st.write("Number of class to predict : ", len(np.unique(df['Attrition_Flag'])))
+    st.write("Differents classes : ", np.unique(df['Attrition_Flag']))
+    st.text("Example of a dataset sample use to predict : ")
     st.write(data_clean.head()) 
+    # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.precision_recall_fscore_support.html
+    # precision, recall, f1-score
+    precision_recall_fscore_support(y_test, y_pred, average='binary',pos_label=1,beta = 1)
+
+    # classification_report for Attrited Customer  
+    st.write("Accuracy: %.2f%%" % (accuracy_score(y_test, y_pred)*100.0))
+    st.write("Recall: %.2f%%" % ((recall_score(y_test,y_pred))*100.0))
+
     st.success("Built with Streamlit")
     st.info("LinkedIn : Charles Emmanuel Kouadio")
 
     
-        
-# # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.precision_recall_fscore_support.html
-# # precision, recall, f1-score
-# precision_recall_fscore_support(y_test, y_pred, average='binary',pos_label=1,beta = 1)
-
-# # classification_report for Attrited Customer  
-# st.write("Accuracy: %.2f%%" % (accuracy_score(y_test, y_pred)*100.0))
-# st.write("Recall: %.2f%%" % ((recall_score(y_test,y_pred))*100.0))
-
-
-
-# else:
-#     erreur = st.text_input("Erreur de traitement !")
-	
-
-
-
-
 
 
 # if __name__ == '__main__':
