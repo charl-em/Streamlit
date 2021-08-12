@@ -14,6 +14,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics import accuracy_score, recall_score, precision_score
 from sklearn.ensemble import RandomForestClassifier
+
+from st_aggrid import GridOptionsBuilder, AgGrid, GridUpdateMode, DataReturnMode, JsCode
+# File Processing Pkgs
+import pandas as pd
+# import docx2txt
+# from PyPDF2 import PdfFileReader
+# import pdfplumber
+
+from PIL import Image
+
 # Erreur
 import warnings
 warnings.filterwarnings("ignore")
@@ -44,18 +54,19 @@ def select_aleatoire(nbre):
     data = c.fetchall()
     return data
 
-menu = ["Unique prediction","Multiple prediction from the database","About"]
-choice = st.sidebar.selectbox("Préedictions options",menu)
+menu = ["Unique prediction","Multiple prediction from the database","Select from a file","About"]
+choice = st.sidebar.selectbox("Prediction options",menu)
+
 
 def file_selector(folder_path='./database/'):
         filenames = os.listdir(folder_path)
         selected_filename = st.selectbox('Select a file', filenames)
+        
         return os.path.join(folder_path, selected_filename)
 
 filename = file_selector()
-st.write('You selected `%s`' % filename)
 df = pd.read_csv(filename, sep=';')
-
+st.write("You selected :open_file_folder: `%s`" % filename)
 # required features for predicting churning customers
 required_fields = ["Attrition_Flag", "Contacts_Count_12_mon", "Total_Trans_Ct", "Total_Trans_Amt",
                 "Total_Revolving_Bal", "Avg_Utilization_Ratio"]
@@ -84,9 +95,9 @@ def encode_and_bind(original_dataframe, feature_to_encode):
     res = res.drop([feature_to_encode], axis=1)
     return(res) 
 
-    features_to_encode = X.select_dtypes('category').columns.to_list()
-    for feature in features_to_encode:
-        X = encode_and_bind(X, feature)
+features_to_encode = X.select_dtypes('category').columns.to_list()
+for feature in features_to_encode:
+    X = encode_and_bind(X, feature)
 
 scaler = RobustScaler()
 
@@ -99,10 +110,84 @@ RFC.fit(X_train,y_train)
 # predictions using RFC model given X_test data
 y_pred = RFC.predict(X_test)
 
+## FONCTION POUR MANIPULER LE DATAFRAME
+def edit_dataframe(data):
+    ## Pour selectionner des lignes et souvegarder les lignes sélectionnées
+    update_mode_value = GridUpdateMode.MODEL_CHANGED
+
+    gb = GridOptionsBuilder.from_dataframe(data)
+
+    # customize gridOptions
+    gb.configure_default_column(groupable=True, value=True, enableRowGroup=True, aggFunc='sum', editable=True)
+
+    gb.configure_selection(selection_mode='multiple', use_checkbox=True, groupSelectsChildren=True)
+
+    gb.configure_grid_options(domLayout='normal')
+    gridOptions = gb.build()
+   
+    grid_response = AgGrid(data,
+                           gridOptions=gridOptions,
+                           width='100%',
+                           update_mode=update_mode_value,
+                           enable_enterprise_modules='Enable Enterprise Modules'
+                           )
+
+    ## Les valeurs sélectionnées de mon Dataframe
+    df = grid_response['data']
+
+    selected = grid_response['selected_rows']
+    selected_df = pd.DataFrame(selected)
+    # st.write(selected_df)
+    return df, selected,selected_df
+
+
+## Lire et predire tous le dataset
+
+def read_predict(df):
+    # data = df.copy()
+
+    colonne_selectionne = ["CLIENTNUM",
+                           "Contacts_Count_12_mon",
+                           "Total_Trans_Ct",
+                           "Total_Trans_Amt",
+                           "Total_Revolving_Bal",
+                           "Avg_Utilization_Ratio","Attrition_Flag"]
+
+    liste_bool = []
+    for col in colonne_selectionne:
+        if col in df.columns:
+            liste_bool.append(True)
+        else:
+            liste_bool.append(False)
+
+    if all(liste_bool) == False:
+        st.warning("Operation not possible, the file you loaded does not contain adequate columns for the prediction.")
+    else:
+        data = df[colonne_selectionne]
+        dt, selected, selected_df = edit_dataframe(data)
+        # st.write(selected)
+        X = selected_df.drop(["CLIENTNUM","Attrition_Flag"], axis=1)
+        st.write(X)  
+        # y = selected_df["Attrition_Flag"]
+        ypred = RFC.predict(X)
+        liste_pred = []
+        for pred in ypred:
+            if pred == 0:
+                msg = "Existing client"
+            else:
+                msg = "Attrited client"
+
+            liste_pred.append(msg)
+
+        st.subheader("Predictions of selected clients:")
+
+        de = pd.concat([selected_df, pd.DataFrame(liste_pred, columns=["Predictions"])], axis=1)
+        st.dataframe(de) # AgGrid(de)
+
 if choice == "Unique prediction":
     st.subheader("Select Banque.csv")
     st.title('Unique prediction of the bank customer\'s status')
-    st.subheader("Please fill in the values ​​below in numbers")
+    st.subheader("Please fill in the values below in numbers")
 
     with st.form(key='form1'):
         f1 = st.number_input("Number of contacts in the last 12 months",1,100)
@@ -117,6 +202,7 @@ if choice == "Unique prediction":
     statut_client = ""
     if user_input_pred == 0:
         statut_client = "Existing"
+        st.balloons()
     else:
         statut_client = "Attrited"
     if submit_button:
@@ -164,24 +250,55 @@ elif choice == "Multiple prediction from the database":
                 msg="Attrited client"
 
             liste_pred.append(msg)
-        # st.dataframe(pd.DataFrame(liste_pred, columns=["Predictions"]))
+        # st.dataframe(pd.DataFrame(signs, columns=["Results"]))
 
         de=pd.concat([result_al_df, pd.DataFrame(liste_pred, columns=["Predictions"])], axis=1)
         st.dataframe(de)
+
+elif choice == "Select from a file":
+    st.title("Select from a file some clients based on their features")
+    with st.expander('View Data'):
+        AgGrid(df)
+
+    if df.empty == False:
+        df = pd.read_csv(filename, sep=';')
+        read_predict(df)
+    # csv_excel_file = st.file_uploader("Load here", type=["csv","xls", "txt"])
+    # if csv_excel_file is not None:
+    #     # details_fichier = {
+    #     #     "Nom du fichier": csv_excel_file.name,
+    #     #     "Type du fichier": csv_excel_file.type,
+    #     #     "Taille du fichier": csv_excel_file.size
+    #     # }
+    #     # st.write(details_fichier)
+
+    #     if csv_excel_file.type == "application/vnd.ms-excel":
+    #         df = pd.read_csv(csv_excel_file, na_values=['Unknown'], sep=';')
+    #         #st.write(df)
+    #         read_predict(df)
+
+    else:
+        df = pd.read_table(filename, sep=';')
+        read_predict(df)
+
 else:
     st.title("About")
-    st.subheader("CONTEXT")
-    st.text("A bank official wants to reduce the number of customers who leave their credit card services. He would like to be able to anticipate the departure of customers in order to provide them with better services and thus retain them.")
-    st.subheader("GOALS")
-    st.text("Set up a Machine Learning model capable of predicting customer departures trained from the Banque.csv dataset.")
-    st.text('Prédiction multiple depuis la base de données: donne le statut d\'un nombre sélectionnés de clients de la banque selon les valeurs enregistrés en base de données')
-    st.text('Dataset original :')
+    image = Image.open('bank.jpg')
+    st.image(image)
+    st.header("CONTEXT :smirk:")
+    st.markdown("A bank official wants to reduce the number of customers who leave their credit card services. He would like to be able to anticipate the departure of customers in order to provide them with better services and thus retain them.")
+    st.header("GOALS :sunglasses:")
+    st.markdown("Set up a Machine Learning model capable of predicting customer departures trained from the Banque.csv dataset.")
+    st.markdown('**Unique prediction**: predict the statut of a client based on the features filled in the form')
+    st.markdown('**Multiple prediction from the database**: gives the status of a selected number of bank customers according to the values ​​recorded in the database')
+    st.text('Dataset original : ')
     st.write(df.head())
-    st.write('Required features (abrégé et dans l\'ordre):', required_fields)
+    st.write('Required features (abrégé et dans l\'ordre): :eyes:', required_fields)
     st.subheader("Dataset description :")
     st.write("Initial dimension of the dataset : ", df.shape)
     st.write("Number of class to predict : ", len(np.unique(df['Attrition_Flag'])))
     st.write("Differents classes : ", np.unique(df['Attrition_Flag']))
+    st.write('0 : :x: 1 : :heavy_check_mark:')
     st.text("Example of a dataset sample use to predict : ")
     st.write(data_clean.head()) 
     # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.precision_recall_fscore_support.html
@@ -192,11 +309,4 @@ else:
     st.write("Accuracy: %.2f%%" % (accuracy_score(y_test, y_pred)*100.0))
     st.write("Recall: %.2f%%" % ((recall_score(y_test,y_pred))*100.0))
 
-    st.success("Built with Streamlit")
-    st.info("LinkedIn : Charles Emmanuel Kouadio")
-
-    
-
-
-# if __name__ == '__main__':
-# 	main()
+    st.info("LinkedIn : Charles Emmanuel Kouadio :wave:")
