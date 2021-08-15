@@ -28,24 +28,6 @@ from PIL import Image
 import warnings
 warnings.filterwarnings("ignore")
 
-
-
-# Initialize connection.
-# Uses st.cache to only run once.
-# @st.cache(allow_output_mutation=True, hash_funcs={"_thread.RLock": lambda _: None})
-# def init_connection():
-#     return mysql.connector.connect(**st.secrets["mysql"])
-
-# conn = init_connection()
-
-# Perform query.
-# Uses st.cache to only rerun when the query changes or after 10 min.
-# @st.cache(ttl=600)
-# def run_query(query):
-#     with conn.cursor() as cur:
-#         cur.execute(query)
-#         return cur.fetchall()
-
 conn = sqlite3.connect('db.sqlite3')
 c = conn.cursor()
 
@@ -54,9 +36,8 @@ def select_aleatoire(nbre):
     data = c.fetchall()
     return data
 
-menu = ["Unique prediction","Multiple prediction from the database","Select from a file","About"]
+menu = ["About","Unique prediction","Multiple prediction from the database","Select from a file"]
 choice = st.sidebar.selectbox("Prediction options",menu)
-
 
 def file_selector(folder_path='./database/'):
         filenames = os.listdir(folder_path)
@@ -78,10 +59,6 @@ cat_types = ['bool','object','category']
 data_clean = df_model.copy()
 data_clean[data_clean.select_dtypes(cat_types).columns] = data_clean.select_dtypes(cat_types).apply(lambda x: x.astype('category'))
 
-# Label and One Hot Encoding on catagorical independent variables
-# https://stackoverflow.com/questions/37292872/how-can-i-one-hot-encode-in-python
-
-# Split data_clean into two datasets y - depedent variable, x - independent variables 
 # Map Attrited Customer = 1 and Existing Customer = 0
 codes = {'Existing Customer':0, 'Attrited Customer':1}
 data_clean['Attrition_Flag'] = data_clean['Attrition_Flag'].map(codes)
@@ -98,8 +75,6 @@ def encode_and_bind(original_dataframe, feature_to_encode):
 features_to_encode = X.select_dtypes('category').columns.to_list()
 for feature in features_to_encode:
     X = encode_and_bind(X, feature)
-
-scaler = RobustScaler()
 
 #  train-test stratified split using 80-20 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state = 0, shuffle= True,stratify = y)
@@ -136,23 +111,17 @@ def edit_dataframe(data):
     df = grid_response['data']
 
     selected = grid_response['selected_rows']
-    selected_df = pd.DataFrame(selected)
-    # st.write(selected_df)
-    return df, selected,selected_df
-
+    selected_df = pd.DataFrame(selected) 
+    return selected,selected_df
 
 ## Lire et predire tous le dataset
-
 def read_predict(df):
-    # data = df.copy()
-
     colonne_selectionne = ["CLIENTNUM",
                            "Contacts_Count_12_mon",
                            "Total_Trans_Ct",
                            "Total_Trans_Amt",
                            "Total_Revolving_Bal",
                            "Avg_Utilization_Ratio","Attrition_Flag"]
-
     liste_bool = []
     for col in colonne_selectionne:
         if col in df.columns:
@@ -164,11 +133,8 @@ def read_predict(df):
         st.warning("Operation not possible, the file you loaded does not contain adequate columns for the prediction.")
     else:
         data = df[colonne_selectionne]
-        dt, selected, selected_df = edit_dataframe(data)
-        # st.write(selected)
+        selected, selected_df = edit_dataframe(data) 
         X = selected_df.drop(["CLIENTNUM","Attrition_Flag"], axis=1)
-        st.write(X)  
-        # y = selected_df["Attrition_Flag"]
         ypred = RFC.predict(X)
         liste_pred = []
         for pred in ypred:
@@ -202,56 +168,34 @@ if choice == "Unique prediction":
     statut_client = ""
     if user_input_pred == 0:
         statut_client = "Existing"
-        st.balloons()
     else:
         statut_client = "Attrited"
-    if submit_button:
+    if submit_button and statut_client == "Existing":
         st.success("The customer's status is {} ".format(statut_client))
+        st.balloons()
+    else:
+        st.warning("The customer's status is {} ".format(statut_client))
 
 elif choice == "Multiple prediction from the database":
     number = st.number_input('Enter a positive number between 10127', min_value=0, max_value=10127, step=1)
-    # rows = run_query(f"SELECT Contacts_Count_12_mon, Total_Trans_Ct, Total_Trans_Amt, Total_Revolving_Bal, Avg_Utilization_Ratio FROM `banque` ORDER BY RAND() LIMIT {number};")
-    # st.title("Prédiction multiple depuis la base de données")
-    # mult_stat_client = []
-    # for row in rows:
-    #     db_input = np.array(row).reshape(1, -1)
-    #     st.write(db_input)
-    #     mult_rand_db_input_pred = RFC.predict(db_input)
-    #     # st.write(mult_rand_db_input_pred)
-    #     if  mult_rand_db_input_pred == 0:
-    #         mult_stat_client.append('Existing')
-    #     else:
-    #         mult_stat_client.append('Attrited')
-    #     # st.write(mult_stat_client)
-    # pred_db_input = DataFrame(mult_stat_client,columns= ['Prediction'])
-    # st.write(pred_db_input)
-
     rechercher = st.button('Load')
     if rechercher:
         resul_rech_al = select_aleatoire(number)
         result_al_df = pd.DataFrame(resul_rech_al,columns=["Contacts_Count_12_mon", "Total_Trans_Ct", "Total_Trans_Amt",
                 "Total_Revolving_Bal", "Avg_Utilization_Ratio","Attrition_Flag"] )
-        # st.dataframe(result_al_df)
-
         liste_pred = []
         for i in range(result_al_df.shape[0]):
             X = result_al_df.iloc[i,:-1]
         #    for j in range(X.shape[0]):
         #     #    st.write(X[j])
             X=np.array(X).reshape(1,-1)
-            #st.write(X)
-
             ypred = RFC.predict(X)
-            # st.write(ypred)
-
             if ypred==0:
                 msg="Existing client"
             elif ypred==1:
                 msg="Attrited client"
 
             liste_pred.append(msg)
-        # st.dataframe(pd.DataFrame(signs, columns=["Results"]))
-
         de=pd.concat([result_al_df, pd.DataFrame(liste_pred, columns=["Predictions"])], axis=1)
         st.dataframe(de)
 
@@ -259,28 +203,13 @@ elif choice == "Select from a file":
     st.title("Select from a file some clients based on their features")
     with st.expander('View Data'):
         AgGrid(df)
-
+    st.subheader("Select one or multiple rows")
     if df.empty == False:
         df = pd.read_csv(filename, sep=';')
         read_predict(df)
-    # csv_excel_file = st.file_uploader("Load here", type=["csv","xls", "txt"])
-    # if csv_excel_file is not None:
-    #     # details_fichier = {
-    #     #     "Nom du fichier": csv_excel_file.name,
-    #     #     "Type du fichier": csv_excel_file.type,
-    #     #     "Taille du fichier": csv_excel_file.size
-    #     # }
-    #     # st.write(details_fichier)
-
-    #     if csv_excel_file.type == "application/vnd.ms-excel":
-    #         df = pd.read_csv(csv_excel_file, na_values=['Unknown'], sep=';')
-    #         #st.write(df)
-    #         read_predict(df)
-
     else:
         df = pd.read_table(filename, sep=';')
         read_predict(df)
-
 else:
     st.title("About")
     image = Image.open('bank.jpg')
